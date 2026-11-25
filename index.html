@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Study Buddy</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#3b5bdb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+:root{--bg:#faf8f4;--card:#fff;--ink:#1f1d1a;--mute:#6b665e;--line:#e5e0d6;--acc:#3b5bdb;--accfg:#fff;--ok:#2b8a3e;--bad:#c92a2a}
+@media (prefers-color-scheme:dark){:root{--bg:#17160f;--card:#211f18;--ink:#f1ede4;--mute:#a39d90;--line:#3a372d;--acc:#7c93ff;--accfg:#10131f;--ok:#69db7c;--bad:#ff8787}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding-top:env(safe-area-inset-top,0px)}
+main{max-width:720px;margin:0 auto;padding:16px 16px 96px}
+h1{font-size:1.4rem;margin:0 0 12px}h2{font-size:1.1rem;margin:16px 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:9px 14px;cursor:pointer}
+button.p{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:12px 0}
+.tabs button.on{background:var(--acc);color:var(--accfg);border-color:var(--acc)}
+textarea,input[type=text]{width:100%;font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin:4px 0}
+.mute{color:var(--mute);font-size:.9rem}
+.doc{display:flex;justify-content:space-between;gap:8px;align-items:center;cursor:pointer}
+.opt{display:block;width:100%;text-align:left;margin:6px 0}
+.ok{border-color:var(--ok);color:var(--ok)}.no{border-color:var(--bad);color:var(--bad)}
+.notes{white-space:pre-wrap}.big{font-size:1.15rem;min-height:70px}
+.nav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:8px;background:var(--card);border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));z-index:5}
+.nav button{flex:1;max-width:200px;border:0;background:none;padding:4px;font-size:1.2rem}
+.nav button .mute{font-size:.75rem}.nav button.on .mute{color:var(--acc);font-weight:600}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tile{text-align:left;padding:14px;border-radius:14px}
+.tile .ic{font-size:1.6rem}.tile .tt{font-weight:600;margin-top:4px}
+.stat{text-align:center;margin:0;padding:10px}.num{font-size:1.5rem;font-weight:700}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+(function(){
+var KEY="studybuddy.pwa.v1",S={docs:[],sel:null},tab="notes",view="home",pend=null,quiz={},review={},found={},flash={};
+try{var raw=localStorage.getItem(KEY);if(raw)S=JSON.parse(raw);}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function $(t,a,k){var e=document.createElement(t);a=a||{};for(var x in a){if(x==="class")e.className=a[x];else if(x==="onclick")e.onclick=a[x];else e.setAttribute(x,a[x]);}(k||[]).forEach(function(c){e.append(c);});return e;}
+function doc(){return S.docs.find(function(d){return d.id===S.sel;});}
+/* ---- text tools (no AI, works offline) ---- */
+var STOP=new Set("about above after again also although among another because been before being between both cannot could does doing during each either else even every from further have having here however into itself just like made make many more most much must only other over same should since some such than that their them then there these they this those through under until upon very were what when where whether which while will with within without would your".split(" "));
+function toks(s){return(s.toLowerCase().match(/[a-z\u00C0-\u024F][a-z\u00C0-\u024F'-]{3,}/g)||[]).filter(function(w){return !STOP.has(w);});}
+function freq(t){var f={};toks(t).forEach(function(w){f[w]=(f[w]||0)+1;});return f;}
+function sents(t,min){return(t.replace(/\s+/g," ").match(/[^.!?]+[.!?]+/g)||[]).map(function(x){return x.trim();}).filter(function(x){return x.length>=min&&x.length<=240;});}
+function scored(t){var f=freq(t);return sents(t,35).map(function(x,i){var w=toks(x),sc=w.reduce(function(a,b){return a+(f[b]||0);},0)/Math.sqrt(w.length+1);return{x:x,i:i,sc:sc,w:w,f:f};}).sort(function(a,b){return b.sc-a.sc;});}
+function makeNotes(t){var top=scored(t).slice(0,6).sort(function(a,b){return a.i-b.i;}),f=freq(t),terms=Object.keys(f).sort(function(a,b){return f[b]-f[a];}).slice(0,12);
+ return"SUMMARY\n"+(top.map(function(s){return"\u2022 "+s.x;}).join("\n")||"Not enough text to summarize.")+"\n\nKEY TERMS\n"+terms.join(", ");}
+function makeCards(t){var out=[],seen={};scored(t).slice(0,25).forEach(function(s){var best=s.w.filter(function(w){return w.length>=5;}).sort(function(a,b){return(s.f[b]||0)-(s.f[a]||0);})[0];if(!best)return;var re=new RegExp("\\b"+best.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i");if(!re.test(s.x))return;var q=s.x.replace(re,"_____");if(seen[q])return;seen[q]=1;out.push({q:q,a:best});});return out;}
+function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),x=a[i];a[i]=a[j];a[j]=x;}return a;}
+function makeQuiz(d){var seen={},cs=shuffle(d.cards).filter(function(c){if(seen[c.a])return false;seen[c.a]=1;return true;});if(cs.length<4)return null;
+ return cs.slice(0,5).map(function(c){var wrong=shuffle(cs.filter(function(x){return x!==c;})).slice(0,3).map(function(x){return x.a;}),opts=shuffle([c.a].concat(wrong));return{q:c.q,options:opts,answer:opts.indexOf(c.a),why:"Answer: "+c.a};});}
+/* ---- screens ---- */
+function render(){
+ var app=document.getElementById("app");app.textContent="";
+ if(view==="doc"&&!doc())view="home";
+ ({home:homeV,library:libV,pick:pickV,settings:setV,doc:docV})[view](app);
+ var nv=$("nav",{class:"nav"});
+ [["home","\u{1F3E0}","Home"],["library","\u{1F4DA}","Library"],["settings","\u2699\uFE0F","Backup"]].forEach(function(x){nv.append($("button",{class:view===x[0]?"on":"",onclick:function(){view=x[0];render();}},[$("div",{},[x[1]]),$("div",{class:"mute"},[x[2]])]));});
+ app.append(nv);
+}
+function open(d,t){S.sel=d.id;tab=t||"notes";view="doc";save();render();}
+function go(t){if(!S.docs.length){view="library";render();return;}if(S.docs.length===1){open(S.docs[0],t);return;}pend=t;view="pick";render();}
+var LABEL={notes:"Study notes",cards:"Flashcards",quiz:"Quiz",find:"Find answers"};
+function dueN(d){return d.cards.filter(function(c){return c.due<=Date.now();}).length;}
+function homeV(app){
+ app.append($("h1",{},["Ready to study?"]));
+ var due=0,cards=0;S.docs.forEach(function(d){cards+=d.cards.length;due+=dueN(d);});
+ var st=$("div",{class:"grid3"});
+ [[S.docs.length,"Documents"],[cards,"Cards"],[due,"Due now"]].forEach(function(x){st.append($("div",{class:"card stat"},[$("div",{class:"num"},[String(x[0])]),$("div",{class:"mute"},[x[1]])]));});
+ app.append(st,$("h2",{},["What do you want to do?"]));
+ var g=$("div",{class:"grid"});
+ var tile=function(ic,t,sub,fn){g.append($("button",{class:"tile",onclick:fn},[$("div",{class:"ic"},[ic]),$("div",{class:"tt"},[t]),$("div",{class:"mute"},[sub])]));};
+ tile("\u2795","Add material","Upload or paste a document",function(){view="library";render();});
+ tile("\u{1F4DD}","Study notes","Summary & key terms",function(){go("notes");});
+ tile("\u{1F0CF}","Flashcards",due+" due for review",function(){go("cards");});
+ tile("\u2753","Take a quiz","Multiple choice from your cards",function(){go("quiz");});
+ tile("\u{1F50E}","Find answers","Search inside a document",function(){go("find");});
+ tile("\u{1F4BE}","Backup","Export or restore your data",function(){view="settings";render();});
+ app.append(g);
+ if(!S.docs.length)app.append($("p",{class:"mute"},["Start with \u201CAdd material\u201D. Then every other option works on your documents."]));
+ else{app.append($("h2",{},["Recent documents"]));S.docs.slice(-3).reverse().forEach(function(d){app.append(docRow(d));});}
+}
+function docRow(d){
+ var r=$("div",{class:"card doc",onclick:function(){open(d);}});
+ r.append($("div",{},[$("div",{},[d.name]),$("div",{class:"mute"},[d.cards.length+" cards \u00B7 "+dueN(d)+" due"])]));
+ r.append($("button",{onclick:function(e){e.stopPropagation();if(confirm("Delete this document?")){S.docs=S.docs.filter(function(x){return x!==d;});save();render();}}},["Delete"]));
+ return r;
+}
+function pickV(app){app.append($("h1",{},[LABEL[pend]+": pick a document"]));S.docs.forEach(function(d){var r=docRow(d);r.onclick=function(){open(d,pend);};app.append(r);});}
+function docV(app){
+ var d=doc();
+ app.append($("button",{onclick:function(){view="home";render();}},["\u2190 Back"]),$("h2",{},[d.name]));
+ var t=$("div",{class:"tabs"});
+ [["notes","Notes"],["cards","Flashcards"],["quiz","Quiz"],["find","Find"]].forEach(function(x){t.append($("button",{class:tab===x[0]?"on":"",onclick:function(){tab=x[0];render();}},[x[1]]));});
+ app.append(t);
+ ({notes:notesV,cards:cardsV,quiz:quizV,find:findV})[tab](app,d);
+}
+function libV(app){
+ app.append($("h1",{},["Library"]));
+ var c=$("div",{class:"card"});
+ c.append($("div",{},["Add study material"]));
+ var ta=$("textarea",{rows:"5",placeholder:"Paste text here\u2026"}),nm=$("input",{type:"text",placeholder:"Name (e.g. Biology ch. 3)"}),fi=$("input",{type:"file",accept:".txt,.md,.pdf",multiple:"multiple"}),msg=$("div",{class:"mute"});
+ var add=function(name,text){if(!text.trim())return;var id=String(Date.now())+Math.random().toString(36).slice(2,5);S.docs.push({id:id,name:name||"Untitled",text:text,notes:"",cards:[]});S.sel=id;save();render();};
+ fi.onchange=async function(){
+  for(var f of fi.files){
+   try{
+    if(/\.pdf$/i.test(f.name)){
+     if(!window.pdfjsLib)throw new Error("PDF reader not loaded yet (needs internet once)");
+     var pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise,out="";
+     for(var i=1;i<=pdf.numPages;i++){var pg=await pdf.getPage(i),tc=await pg.getTextContent();out+=tc.items.map(function(s){return s.str;}).join(" ")+"\n";}
+     if(out.trim().length<20)throw new Error("No selectable text (scanned?)");
+     add(f.name,out);
+    }else add(f.name,await f.text());
+   }catch(e){msg.textContent="Couldn\u2019t read "+f.name+": "+e.message+". Try pasting the text instead.";}
+  }
+ };
+ c.append(fi,$("div",{class:"mute"},["or paste:"]),nm,ta,$("div",{class:"row"},[$("button",{class:"p",onclick:function(){add(nm.value,ta.value);}},["Save text"])]),msg);
+ app.append(c,$("h2",{},["Your documents"]));
+ if(!S.docs.length)app.append($("p",{class:"mute"},["Nothing here yet."]));
+ S.docs.forEach(function(d){app.append(docRow(d));});
+}
+function setV(app){
+ app.append($("h1",{},["Backup"]));
+ var bk=$("div",{class:"card"}),bm=$("div",{class:"mute"});
+ var ex=$("button",{class:"p",onclick:function(){var b=new Blob([JSON.stringify(S)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="study-buddy-backup.json";a.click();}},["Export backup"]);
+ var im=$("input",{type:"file",accept:".json"});
+ im.onchange=async function(){try{var o=JSON.parse(await im.files[0].text());if(o&&Array.isArray(o.docs)){S=o;S.sel=null;save();view="home";render();}}catch(e){bm.textContent="Not a valid backup file.";}};
+ bk.append($("div",{},["Your data lives on this device only. Export a backup now and then, and use it to move to another device."]),$("div",{class:"row"},[ex]),$("div",{class:"mute"},["Restore a backup:"]),im,bm);
+ app.append(bk);
+}
+function notesV(app,d){
+ var out=$("div",{class:"card notes"},[d.notes||"No notes yet."]);
+ app.append($("button",{class:"p",onclick:function(){d.notes=makeNotes(d.text);save();render();}},[d.notes?"Regenerate notes":"Generate summary & key terms"]),out,$("div",{class:"mute"},["Made automatically from your text by picking the most important sentences and words."]));
+}
+function cardsV(app,d){
+ var gen=$("button",{onclick:function(){var have={};d.cards.forEach(function(c){have[c.q]=1;});var n=0;makeCards(d.text).forEach(function(c){if(!have[c.q]){d.cards.push({q:c.q,a:c.a,due:Date.now(),int:0,ease:2.3});n++;}});flash[d.id]=n?n+" cards added.":"No new cards could be made from this text.";save();render();}},["Auto-make cards"]);
+ app.append($("div",{class:"row"},[gen,$("span",{class:"mute"},[flash[d.id]||""])]));
+ var q=$("input",{type:"text",placeholder:"Question / front"}),a=$("input",{type:"text",placeholder:"Answer / back"});
+ app.append($("div",{class:"card"},[$("div",{class:"mute"},["Add your own card"]),q,a,$("button",{onclick:function(){if(q.value.trim()&&a.value.trim()){d.cards.push({q:q.value.trim(),a:a.value.trim(),due:Date.now(),int:0,ease:2.3});save();render();}}},["Add card"])]));
+ var due=d.cards.filter(function(c){return c.due<=Date.now();});
+ if(!d.cards.length)return;
+ if(!due.length){app.append($("div",{class:"card"},["All caught up. "+d.cards.length+" cards, none due right now."]));return;}
+ var c=due[0],shown=review[c.q];
+ var card=$("div",{class:"card"},[$("div",{class:"mute"},[due.length+" due"]),$("div",{class:"big"},[c.q])]);
+ if(!shown)card.append($("button",{class:"p",onclick:function(){review[c.q]=1;render();}},["Show answer"]));
+ else{
+  card.append($("div",{class:"big"},[c.a]));
+  var rate=function(g){return function(){
+   if(g===0){c.int=0;c.due=Date.now()+60000;c.ease=Math.max(1.3,c.ease-.2);}
+   else{c.int=Math.max(1,Math.round((c.int||1)*c.ease*(g===2?1.5:1)));if(g===2)c.ease+=.1;c.due=Date.now()+c.int*864e5;}
+   delete review[c.q];save();render();};};
+  card.append($("div",{class:"row"},[$("button",{onclick:rate(0)},["Again"]),$("button",{class:"p",onclick:rate(1)},["Good"]),$("button",{onclick:rate(2)},["Easy"])]));
+ }
+ app.append(card);
+}
+function quizV(app,d){
+ var q=quiz[d.id],st=$("div",{class:"mute"});
+ app.append($("button",{class:"p",onclick:function(){var qs=makeQuiz(d);if(!qs){st.textContent="You need at least 4 cards with different answers. Make cards first.";return;}quiz[d.id]={qs:qs,pick:{}};render();}},[q?"New quiz":"Start quiz"]),st);
+ if(!q)return;
+ q.qs.forEach(function(it,i){
+  var c=$("div",{class:"card"},[$("div",{},[(i+1)+". "+it.q])]);
+  it.options.forEach(function(o,k){var p=q.pick[i],cls="opt";if(p!==undefined){if(k===it.answer)cls+=" ok";else if(k===p)cls+=" no";}c.append($("button",{class:cls,onclick:function(){if(q.pick[i]===undefined){q.pick[i]=k;render();}}},[o]));});
+  if(q.pick[i]!==undefined)c.append($("div",{class:"mute"},[it.why]));
+  app.append(c);
+ });
+ if(Object.keys(q.pick).length===q.qs.length)app.append($("div",{class:"card"},["Score: "+q.qs.filter(function(it,i){return q.pick[i]===it.answer;}).length+" / "+q.qs.length]));
+}
+function findV(app,d){
+ var inp=$("input",{type:"text",placeholder:"Type a question or keywords\u2026"}),res=$("div");
+ var run=function(){
+  res.textContent="";var qw=toks(inp.value);if(!qw.length)return;
+  var hits=sents(d.text,15).map(function(x){var w=toks(x),n=qw.filter(function(k){return w.indexOf(k)>-1;}).length;return{x:x,n:n};}).filter(function(h){return h.n>0;}).sort(function(a,b){return b.n-a.n;}).slice(0,5);
+  if(!hits.length)res.append($("div",{class:"card"},["No match found in this document."]));
+  hits.forEach(function(h){res.append($("div",{class:"card"},[h.x]));});
+ };
+ inp.onkeydown=function(e){if(e.key==="Enter")run();};
+ app.append(inp,$("button",{class:"p",onclick:run},["Search"]),$("div",{class:"mute"},["Finds the sentences in your document that best match your words."]),res);
+}
+render();
+if("serviceWorker" in navigator)window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+<script>window.addEventListener("load",function(){try{pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";}catch(e){}});</script>
+</body>
+</html>
